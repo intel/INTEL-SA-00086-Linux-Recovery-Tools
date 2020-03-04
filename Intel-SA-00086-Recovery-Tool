@@ -4,7 +4,7 @@
 #
 # BSD LICENSE
 #
-# Copyright (C) 2003-2012, 2018 Intel Corporation. All rights reserved.
+# Copyright (C) 2003-2012, 2020 Intel Corporation. All rights reserved.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -89,7 +89,7 @@ cleanup_and_exit () {
 }
 
 is_ptt() {
-  ./Intel-SA-00086-Recovery-Utility -p
+  tpm2_getcap properties-fixed | grep TPM2_PT_MANUFACTURER -A 2 | grep INTC -q
   if [ $? != 0 ]; then
     return $FALSE
   fi
@@ -97,12 +97,16 @@ is_ptt() {
 }
 
 is_EPS_TPM_generated() {
-  ./Intel-SA-00086-Recovery-Utility -t
-  return $?
+  tpm2_getcap properties-variable | grep tpmGeneratedEPS | \
+  awk '{print $2}' | grep 1 -q
+  if [ $? != 0 ]; then
+    return $FALSE
+  fi
+  return $TRUE
 }
 
 is_nv_index_defined_and_written() {
-  ./Intel-SA-00086-Recovery-Utility -n $1
+  tpm2_nvreadpublic  $1  2> /dev/null | grep attributes -A 1 | grep written -q
   if [ $? != 0 ];then
     return $FALSE
   else
@@ -120,12 +124,12 @@ is_EK_certificate_present_on_filesystem() {
 }
 
 get_current_EK() {
-  ./Intel-SA-00086-Recovery-Utility -e $1
+  tpm2_createek -c /tmp/ek.ctx -u $1
   return $?
 }
 
 get_EK_Certificate_from_NV() {
-  ./Intel-SA-00086-Recovery-Utility -i $1 -o $2
+  tpm2_nvread $1 -o $2
   if [ $? != 0 ];then
     return $FALSE
   else
@@ -145,7 +149,13 @@ manufacturer_EK_certificate_to_standard_PEM_DER_format() {
 }
 
 get_EK_certificate_based_on_manufacturer_generated_EPS() {
-  ./Intel-SA-00086-Recovery-Utility -c $1 -e $2
+  tpm2_getekcertificate -X -x -u $2 https://ekop.intel.com/ekcertservice/ | \
+  grep "Certificate not found" -q
+  if [ $? == 0 ];then
+    echo "ERROR: Failed retrieving EK certificate"
+    return $FALSE
+  fi
+  tpm2_getekcertificate -X -x -u $2 -o $1 https://ekop.intel.com/ekcertservice/
   if [ $? != 0 ];then
     echo "ERROR: Failed retrieving EK certificate"
     return $FALSE
@@ -156,8 +166,17 @@ get_EK_certificate_based_on_manufacturer_generated_EPS() {
 }
 
 make_current_ek_persistent() {
-  ./Intel-SA-00086-Recovery-Utility -e $1 -s
-  return $?
+  tpm2_createek -c /tmp/ek.ctx -u $1
+  if [ $? != 0 ];then
+    echo "ERROR: Couldn't read endorsement key."
+    return $FALSE
+  fi
+  tpm2_evictcontrol -C o -c /tmp/ek.ctx 0x81010001
+  if [ $? != 0 ];then
+    echo "ERROR: Couldn't persist endorsement key in the TPM."
+    return $FALSE
+  fi
+  return $TRUE
 }
 
 get_offset_from_asn1_tag() {
@@ -428,7 +447,7 @@ fi
 #TSI
 if [[ $global_flag_EK_certificate_on_filesystem == 0 && $global_flag_NV == 0 && $global_flag_TPM_EPS == 1 ]];then
   make_current_ek_persistent $global_EK_current 
-  if [ $? != 0 ];then
+  if [ $? != $TRUE ];then
     echo "ERROR: EKpublic could not be made persistent"
     #Check PH or OH Password
     cleanup_and_exit $FALSE

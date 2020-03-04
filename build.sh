@@ -38,11 +38,13 @@
 pushd Packages
 
 #TSS
-tar -xvzf tpm2-tss-1.3.0.tar.gz
-pushd tpm2-tss-1.3.0
-./configure --prefix=/usr/local
+wget https://github.com/tpm2-software/tpm2-tss/releases/download/2.3.2/tpm2-tss-2.3.2.tar.gz
+tar -xvzf tpm2-tss-2.3.2.tar.gz
+pushd tpm2-tss-2.3.2
+./configure  --with-udevrulesdir=/etc/udev/rules.d/
 if [ $? != 0 ];then
- echo "ERROR: Missing package dependencies for tss installation. Look in build.sh"
+ echo "ERROR: Missing package dependencies for tss installation."
+ echo "Please refer https://github.com/tpm2-software/tpm2-tss/blob/master/INSTALL.md"
  exit 1
 fi
 make -j8
@@ -51,40 +53,59 @@ if [ $? != 0 ];then
  exit 1
 fi
 sudo make install
-popd
-
-#ABRMD
-tar -xvzf tpm2-abrmd-1.1.1.tar.gz
-pushd tpm2-abrmd-1.1.1
-./configure --prefix=/usr/local --with-dbuspolicydir=/etc/dbus-1/system.d --with-udevrulesdir=/etc/udev/rules.d/
-if [ $? != 0 ];then
- echo "ERROR: Missing package dependencies for tpm2-abrmd installation. Look in build.sh"
- exit 1
-fi
-make -j8
-if [ $? != 0 ];then
- echo "ERROR: Failed ABRMD build/install. Exiting."
- exit 1
-fi
-sudo make install
+sudo ldconfig
 sudo udevadm control --reload-rules && sudo udevadm trigger
 sudo mkdir -p /var/lib/tpm
 sudo groupadd tss && sudo useradd -M -d /var/lib/tpm -s /bin/false -g tss tss
 sudo pkill -HUP dbus-daemon
 popd
 
+#ABRMD
+wget https://github.com/tpm2-software/tpm2-abrmd/releases/download/2.3.1/tpm2-abrmd-2.3.1.tar.gz
+tar -xvzf tpm2-abrmd-2.3.1.tar.gz
+pushd tpm2-abrmd-2.3.1
+./configure --with-dbuspolicydir=/etc/dbus-1/system.d
+if [ $? != 0 ];then
+ echo "ERROR: Missing package dependencies for tpm2-abrmd installation."
+ echo "Please refer https://github.com/tpm2-software/tpm2-abrmd/blob/master/INSTALL.md"
+ exit 1
+fi
+make -j8
+if [ $? != 0 ];then
+ echo "ERROR: Failed ABRMD build. Exiting."
+ exit 1
+fi
+sudo make install
+sudo ldconfig
 popd
 
-gcc -g -o Intel-SA-00086-Recovery-Utility Intel-SA-00086-Recovery-Utility.c `pkg-config --libs --cflags glib-2.0` -lsapi -ltcti-device -ltcti-tabrmd -lcurl -lcrypto -lssl -Wformat -Wformat-security -O2 -D_FORTIFY_SOURCE=2 -fPIE -fPIC -fstack-protector-strong -z relro -z now -z noexecstack
+#TOOLS
+wget https://github.com/tpm2-software/tpm2-tools/releases/download/4.1.1/tpm2-tools-4.1.1.tar.gz
+tar -xvzf tpm2-tools-4.1.1.tar.gz
+pushd tpm2-tools-4.1.1
+./configure
+if [ $? != 0 ];then
+ echo "ERROR: Missing package dependencies for tpm2-tools installation."
+ echo "Please refer https://github.com/tpm2-software/tpm2-tools/blob/master/INSTALL.md"
+ exit 1
+fi
+make -j8
+if [ $? != 0 ];then
+ echo "ERROR: Failed tpm2-tools build/install. Exiting."
+ exit 1
+fi
+sudo make install
+sudo ldconfig
+popd
+
+popd
 
 #iCLS
 ARCH=$(uname -m)
-echo $ARCH | grep -q i
-if [ $? == 0 ];then
- echo "Please install the iCLS package from i386 folder with your package manager command"
-else
- echo "Please install the iCLS package from x86_64 folder with your package manager command"
-fi
+ echo "Please install the iCLS package from $ARCH folder with your package manager command"
+ echo "Example:"
+ echo "1. Verify package signature: rpm --import \"Intel(R) Trust Services.key\" && rpm -K iclsClient-<version>.<arch>.rpm"
+ echo "2. Install package: rpm -i -nodeps iclsClient.rpm"
 
 #Pre-run instructions.
 echo "Now run the resource manager daemon prior to running the tool/ script."
