@@ -45,472 +45,673 @@
 #
 # Configuration Variables 
 # 
-cfg_EK_DER_certificate="EK.der"
-cfg_EK_PEM_certificate="EK.pem"
-cfg_PTT_RECOVERY_APPLICATION="/opt/Intel/iclsClient/lib/IntelPTTEKRecertification"
+cfg_rsa_EK_DER_certificate="rsa_EK.der"
+cfg_rsa_EK_PEM_certificate="rsa_EK.pem"
+cfg_ecc_EK_DER_certificate="ecc_EK.der"
+cfg_ecc_EK_PEM_certificate="ecc_EK.pem"
+cfg_PTT_RECOVERY_APP="/opt/Intel/iclsClient/lib/IntelPTTEKRecertification"
 
-ARCH=$(uname -m)
-echo $ARCH | grep -q i
-if [ $? == 0 ];then
- cfg_PTT_RECOVERY_APPLICATION="/opt/Intel/iclsClient/lib32/IntelPTTEKRecertification"
+if $(uname -m | grep -q i);then
+ cfg_PTT_RECOVERY_APP="/opt/Intel/iclsClient/lib32/IntelPTTEKRecertification"
 fi
 
 #
 # Global Variables
 #
-global_NV_index="0x1C00002"
-TRUE=1
-FALSE=0
+rsa_ekcertificate_NV_index="0x1C00002"
+ecc_ekcertificate_NV_index="0x1C0000a"
 #Flags
-global_flag_TPM_EPS=0
-global_flag_NV=0
-global_flag_EK_certificate_on_filesystem=0
+flag_is_ecc_cert_required=0
+flag_TPM_EPS=0
+flag_rsa_NV=0
+flag_ecc_NV=0
+flag_rsa_EK_certificate_on_filesystem=0
+flag_ecc_EK_certificate_on_filesystem=0
 # Temporary Files
-global_EK_current="EK.bin"
-global_root_PEM="root.pem"
-global_raw_EK_certificate="EK.crt"
-global_EK_certificate_CRL="EK.crl.pem"
-global_EK_in_certificate="EK_in_cert.bin"
+rsa_EK_current="rsa_EK.bin"
+ecc_EK_current="ecc_EK.bin"
+root_PEM="root.pem"
+raw_rsa_EK_certificate="rsa_EK.crt"
+raw_ecc_EK_certificate="ecc_EK.crt"
+rsa_EK_in_certificate="rsa_EK_in_cert.bin"
+ecc_EK_in_certificate="ecc_EK_in_cert.bin"
+rsa_ek_ctx="/tmp/rsa_ek.ctx"
+ecc_ek_ctx="/tmp/ecc_ek.ctx"
+temp_parent_name="temp_parent_name"
+temp_cert_chain=""
+rsa_EK_certificate_CRL="rsa_EK.crl.pem"
+rsa_EK_certificate_chain="rsa_ek_chain.pem"
+reordered_rsa_EK_certificate_chain="reordered_rsa_ek_chain.pem"
+crl_reordered_rsa_EK_certificate_chain="crl_reordered_rsa_ek_chain.pem"
+ecc_EK_certificate_CRL="ecc_EK.crl.pem"
+ecc_EK_certificate_chain="ecc_ek_chain.pem"
+reordered_ecc_EK_certificate_chain="reordered_ecc_ek_chain.pem"
+crl_reordered_ecc_EK_certificate_chain="crl_reordered_ecc_ek_chain.pem"
+rsa_ek_offset_in_pub="60"
+rsa_ek_offset_in_cert="33"
+rsa_ek_pub_length="256"
+ecc_ek_offset_in_pub="58"
+ecc_ek_offset_in_cert="27"
+ecc_ek_pub_length="32"
 
-cleanup_and_exit () {
+cleanup () {
   #Delete all temporary files
-  rm -f *.bin *.cer *.crt *.crl *.cert
-  rm -f $global_EK_current $global_root_PEM $global_raw_EK_certificate 
-  rm -f $global_EK_certificate_CRL $global_EK_in_certificate 
-  rm -f *EK_certificate_chain*
+  rm -f *.bin *.cer *.crt *.crl *.cert \
+  $rsa_EK_current \
+  $ecc_EK_current \
+  $root_PEM \
+  $raw_rsa_EK_certificate \
+  $raw_ecc_EK_certificate \
+  $rsa_EK_in_certificate \
+  $ecc_EK_in_certificate \
+  $rsa_ek_ctx \
+  $ecc_ek_ctx \
+  $temp_parent_name \
+  $temp_cert_chain \
+  $rsa_EK_certificate_CRL \
+  $rsa_EK_certificate_chain \
+  $reordered_rsa_EK_certificate_chain \
+  $crl_reordered_rsa_EK_certificate_chain \
+  $ecc_EK_certificate_CRL \
+  $ecc_EK_certificate_chain \
+  $reordered_ecc_EK_certificate_chain \
+  $crl_reordered_ecc_EK_certificate_chain \
+  $rsa_ek_offset_in_pub \
+  $rsa_ek_offset_in_cert \
+  $rsa_ek_pub_length \
+  $ecc_ek_offset_in_pub \
+  $ecc_ek_offset_in_cert \
+  $ecc_ek_pub_length
+}
 
-  if [ $1 != $TRUE ];then
-    echo "ERROR: $cfg_EK_DER_certificate is not the expected EK certificate"
-    echo "ERROR: Please move/ delete $cfg_EK_DER_certificate file and run again"
-    exit 1
-  fi
+cleanup_and_exit_in_error() {
 
-  exit 0
+  cleanup
+  echo "ERROR: EK certificates on filesystem inconsisten with current EK"
+  echo "ERROR: Please move/ delete files: $cfg_rsa_EK_DER_certificate\
+    $cfg_ecc_EK_DER_certificatethe certificate files and try again"
+  
+  exit 1
 }
 
 is_ptt() {
   tpm2_getcap properties-fixed | grep TPM2_PT_MANUFACTURER -A 2 | grep INTC -q
-  if [ $? != 0 ]; then
-    return $FALSE
+  if [ $? != 0 ];then
+    return 1
   fi
-  return $TRUE
+  return 0
 }
 
 is_EPS_TPM_generated() {
-  tpm2_getcap properties-variable | grep tpmGeneratedEPS | \
+  tpm2_getcap properties-variable | grep tpmGeneratedEPS |\
   awk '{print $2}' | grep 1 -q
-  if [ $? != 0 ]; then
-    return $FALSE
+  if [ $? != 0 ];then
+    return 1
   fi
-  return $TRUE
+  flag_TPM_EPS=1
+  return 0
 }
 
 is_nv_index_defined_and_written() {
-  tpm2_nvreadpublic  $1  2> /dev/null | grep attributes -A 1 | grep written -q
+  tpm2_nvreadpublic  $1  2> /dev/null | grep attributes -A 1 |\
+  grep written -q
   if [ $? != 0 ];then
-    return $FALSE
-  else
-    return $TRUE
+    return 1
   fi
+  return 0
 }
 
-is_EK_certificate_present_on_filesystem() {
-  if [ -f $1 ]; then
-    echo "$cfg_EK_DER_certificate from the file system"
-    return $TRUE
-  else
-    return $FALSE
+get_current_rsa_EK() {
+  tpm2_createek -G rsa -c $rsa_ek_ctx -u $1
+  if [ $? != 0 ];then
+    return 1
   fi
+  return 0
 }
 
-get_current_EK() {
-  tpm2_createek -c /tmp/ek.ctx -u $1
-  return $?
+get_current_ecc_EK() {
+  tpm2_createek -G ecc -c $ecc_ek_ctx -u $1
+  if [ $? != 0 ];then
+    return 1
+  fi
+  return 0
 }
 
 get_EK_Certificate_from_NV() {
   tpm2_nvread $1 -o $2
   if [ $? != 0 ];then
-    return $FALSE
-  else
-    return $TRUE
+    return 1
   fi
+  return 0
 }
 
 manufacturer_EK_certificate_to_standard_PEM_DER_format() {
   sed 's/-/+/g;s/_/\//g;s/%3D/=/g;s/^{.*certificate":"//g;s/"}$//g;' $1 |
     base64 --decode > $2
-  openssl x509 -in $2 -out $3 -inform DER -outform PEM > /dev/null
+  openssl x509 -in $2 -out $3 -inform DER -outform PEM  2> /dev/null
   if [ $? != 0 ];then
     echo "ERROR: Failed processing raw EK certificate"
-    return $FALSE
+    return 1
   fi
-  return $TRUE
+  return 0
 }
 
 get_EK_certificate_based_on_manufacturer_generated_EPS() {
-  tpm2_getekcertificate -X -x -u $2 https://ekop.intel.com/ekcertservice/ | \
+  #Check if cert is available
+  tpm2_getekcertificate -X -x -u $2 \
+  https://ekop.intel.com/ekcertservice/ 2>/dev/null | \
   grep "Certificate not found" -q
   if [ $? == 0 ];then
     echo "ERROR: Failed retrieving EK certificate"
-    return $FALSE
+    return 1
   fi
-  tpm2_getekcertificate -X -x -u $2 -o $1 https://ekop.intel.com/ekcertservice/
+  #Download the cert
+  tpm2_getekcertificate -X -x -u $2 -o $1 \
+  https://ekop.intel.com/ekcertservice/ 2>/dev/null
   if [ $? != 0 ];then
     echo "ERROR: Failed retrieving EK certificate"
-    return $FALSE
+    return 1
   fi
   #Process raw EK certificate data
   manufacturer_EK_certificate_to_standard_PEM_DER_format $1 $3 $4
-  return $?
-}
+  if [ $? != 0 ];then
+    return 1
+  fi
 
-make_current_ek_persistent() {
-  tpm2_createek -c /tmp/ek.ctx -u $1
-  if [ $? != 0 ];then
-    echo "ERROR: Couldn't read endorsement key."
-    return $FALSE
-  fi
-  tpm2_evictcontrol -C o -c /tmp/ek.ctx 0x81010001
-  if [ $? != 0 ];then
-    echo "ERROR: Couldn't persist endorsement key in the TPM."
-    return $FALSE
-  fi
-  return $TRUE
+  return 0
 }
 
 get_offset_from_asn1_tag() {
-  openssl asn1parse -in $1  -inform DER | grep -q "$2" 
+  openssl asn1parse -in $1 -inform DER | grep "$2" -q
   if [ $? != 0 ];then
-    return $FALSE
+    return 1
   fi
+
   local __offset=$3
   local offset=$(openssl asn1parse -in $1  -inform DER | grep "$2" -A2 |
     grep STRING | grep -o '^[ ]\{1,\}[0-9]\{1,\}')
   if [ $? != 0 ];then
-    return $FALSE
+    echo "ERROR: Failed to retrieve offset for tag"
+    return 1
   fi
+
   eval $__offset="'$offset'"
-  return $TRUE
+
+  return 0
 }
 
-get_ek_public_from_EK_certificate() {
-  openssl asn1parse -inform DER -in $1 -noout -out $2 -i -strparse $3 > /dev/null
-  return $?
-}
-
+#RSA/ ECC
 is_EK_from_cert_same_as_current_EK() {
-  #Get rsapublic key asn tag
-  local EK_CERT_EK_PUB_OFFSET
-  get_offset_from_asn1_tag $cfg_EK_DER_certificate "rsaEncryption" OFFSET
-  if [ $? != $TRUE ];then
-    echo "ERROR: RSA public key tag/ offset not found"
-    return $FALSE
-  fi
-  #Extract EK from EK_CERT
-  EK_CERT_EK_PUB_OFFSET=$OFFSET
-  get_ek_public_from_EK_certificate $cfg_EK_DER_certificate $global_EK_in_certificate \
-    $EK_CERT_EK_PUB_OFFSET
-  if [ $? != 0 ];then
-    echo "ERROR: Failed to read EK public from EK certificate"
-    return $FALSE
-  fi
+  openssl x509 -pubkey -inform DER -in $1 -out /tmp/pub.pem
+  openssl asn1parse -in /tmp/pub.pem -inform PEM -out $2 -noout
+ 
   #Check if EK from cert is same as current EK
-  cmp -i 102:9 -n 256 $global_EK_current $global_EK_in_certificate -s
+  $(cmp -i $3:$4 -n $5 $6 $2 -s)
   if [ $? != 0 ];then
-    return $FALSE
+    return 1
   fi
-  return $TRUE
+
+  return 0
 }
 
 is_cert_root_certificate() {
-  local OFFSET=0
   local rval=0
+
   get_offset_from_asn1_tag $1 "Authority Key Identifier" OFFSET
-  if [ $? != $TRUE ];then
+  if [ $? != 0 ];then
     echo "ERROR: Authority Key Identifier tag/ offset not found"
-    return $FALSE
+    return 1
   fi
-  openssl asn1parse -in $1 -inform DER -strparse $OFFSET -out authority -noout
+  openssl asn1parse -in $1 -inform DER -out authority -noout -strparse $OFFSET
+  
   get_offset_from_asn1_tag $1 "Subject Key Identifier" OFFSET
-  if [ $? != $TRUE ];then
+  if [ $? != 0 ];then
     echo "ERROR: Subject Key Identifier tag/ offset not found"
-    return $FALSE
+    return 1
   fi
   openssl asn1parse -in $1 -inform DER -strparse $OFFSET -out subject -noout
+
   cmp -i 4:2 authority subject -s
   rval=$?
   rm -f authority subject
   if [ $rval == 1 ];then
     echo "$1 is not a root certificate"
-    return $FALSE
+    return 1
   fi
-  return $TRUE
+
+  return 0
 }
 
 is_certificate_parent_downloaded() {
-  local OFFSET=0
   get_offset_from_asn1_tag $1 "Authority Information Access" OFFSET
-  if [ $? != $TRUE ];then
+  if [ $? != 0 ];then
     echo "Authority Information Access tag/ offset not found"
-    return $FALSE
+    return 1
   fi
+
   local parent_cert
-  parent_cert=$(openssl asn1parse -in $1 -inform DER -strparse $OFFSET -out /dev/stdout -noout |
-    grep -o 'http.*')
+  parent_cert=$(openssl asn1parse -in $1 -inform DER -strparse $OFFSET \
+  -out /dev/stdout -noout | grep -o 'http.*')
   wget -N  $parent_cert -q
   if [ $? != 0 ];then
     echo "Failed to download $parent_cert"
-    return $FALSE
+    return 1
   fi
+
   local __certname=$2
-  local certname=$(echo $parent_cert| grep -o [a-zA-Z_0-9]*.cer$)
+  local certname=$(echo $parent_cert| grep -o "[a-zA-Z_0-9]*.cer$")
   eval $__certname="'$certname'"
-  return $TRUE
+
+  return 0
 }
 
 is_certificate_parent_exist() {
   #Look if cert has authority information access tag
-  local is_der=$FALSE
-  grep CERTIFICATE $1 -q
-  is_der=$?
-  if [ $is_der != $FALSE ];then
-    openssl asn1parse -in $1  -inform DER | grep -q "Authority Information Access"
-  else
-    openssl x509 -in $1 -noout -text | grep -q "Authority Information Access"
-  fi
-  if [ $? != 0 ]; then
-    #No parent certificate found
-    return $FALSE
-  fi
-
-  if [ $is_der != $TRUE ];then
-    openssl x509 -in $1 -inform PEM -out $1.cert -outform DER
+  openssl asn1parse -in $1 -inform DER 2>/dev/null | \
+  grep -q "Authority Information Access"
+  if [ $? != 0 ];then
+    openssl x509 -in $1 -text 2>/dev/null| \
+    grep -q "Authority Information Access"
+    if [ $? != 0 ];then
+      #No parent certificate found
+      return 1
+    else
+      openssl x509 -in $1 -inform PEM -out $1.cert -outform DER
+    fi
   else
     cp $1 $1.cert
   fi
 
-  is_certificate_parent_downloaded $1.cert $2
-  if [ $? != $TRUE ]; then
+  is_certificate_parent_downloaded $1.cert testfile
+  if [ $? != 0 ];then
     echo "Parent certificate could not be downloaded"
-    return $FALSE
+    return 1
   fi
-  return $TRUE
-}
+  temp_parent_name=$testfile
 
-cleanup_and_exit_with_no_messages () {
-  rm -f *.bin *.cer *.crt *.crl *.cert
-  rm -f $global_EK_current $global_root_PEM $global_raw_EK_certificate 
-  rm -f $global_EK_certificate_CRL $global_EK_in_certificate 
-  rm -f *EK_certificate_chain*
-  exit 1
+  return 0
 }
 
 is_connectivity_ok() {
-  wget http://upgrades.intel.com/content/CRL/ekcert/EKRootPublicKey.cer -q --timeout=5 --tries=2 --no-check-certificate
+  wget http://upgrades.intel.com/content/CRL/ekcert/EKRootPublicKey.cer \
+  -q --timeout=5 --tries=3 --no-check-certificate
   if [ $? != 0 ];then
     echo "ERROR: Cannot reach the hosting."
-    echo "Please check your connectivity and proxy in /etc/sudoers and system wide"
-    cleanup_and_exit_with_no_messages
+    echo \
+    "Please check your connectivity and proxy in \/etc/sudoers and system wide"
+    cleanup_and_exit_in_error
   fi
-  rm -f EKRootPublicKey.cer
+  rm -f EKRootPublicKey.cer*
+  return 0
 }
 
 convert_to_pem_and_add_to_chain() {
-  grep CERTIFICATE $1 -q
+  openssl x509 -in $1 -inform DER -out $1.pem -outform PEM
   if [ $? != 0 ];then
-    openssl x509 -in $1 -inform DER -out $1.pem -outform PEM
-  else
     cp $1 $1.pem
   fi
-  cat $1.pem >> EK_certificate_chain
-  echo "" >> EK_certificate_chain 
+
+  cat $1.pem >> $temp_cert_chain
+  echo "" >> $temp_cert_chain
+
   rm -f $1.pem
 }
 
 build_EK_certificate_chain() {
   #EK Certificate
-  convert_to_pem_and_add_to_chain $cfg_EK_DER_certificate
+  temp_cert_chain="$2"
+  convert_to_pem_and_add_to_chain $1
   #Non-root certificates in the chain
-  local Parent
-  local Child=$cfg_EK_DER_certificate
-  local is_root=$FALSE
-  while [[ $is_root == $FALSE ]];do
-    is_certificate_parent_exist $Child Parent
-    if [ $? == $TRUE ];then
-      convert_to_pem_and_add_to_chain $Parent
-      Child=$Parent
+  local Child=$1
+  local is_root=0
+  while [[ $is_root == 0 ]];do
+    is_certificate_parent_exist $Child
+    if [ $? == 0 ];then
+      #echo $temp_parent_name
+      convert_to_pem_and_add_to_chain $temp_parent_name
+      Child=$temp_parent_name
     else
       is_cert_root_certificate $Child
-      is_root=$?
-      if [ $is_root != $TRUE ];then
+      if [ $? != 0 ];then
         echo "ERROR: Root certificate not found"
-        return $FALSE
+        return 1
+      else
+        is_root=1
       fi
     fi
   done
   #Root Certificate
-  openssl x509 -in $Child -inform DER -out $global_root_PEM -outform PEM
+  openssl x509 -in $Child -inform DER -out $root_PEM -outform PEM
   #Reorder non-root certificates
-  sed '/./{H;d;};x;s/\n/={NL}=/g' EK_certificate_chain | 
+  sed '/./{H;d;};x;s/\n/={NL}=/g' $2 | 
   sed -e 's/^={NL}=//' -e '1!G;h;$!d' | 
   sed G | 
-  sed 's/={NL}=/\'$'\n/g' > EK_certificate_chain.pem
+  sed 's/={NL}=/\'$'\n/g' > $3
   #Certificate chain build successful
-  return $TRUE
+  return 0
 }
 
 update_platform_CRL_data_to_EK_certificate_chain () {
   local child_crl
   get_offset_from_asn1_tag $1 "CRL Distribution" OFFSET
-  if [ $? != $TRUE ];then
+  if [ $? != 0 ];then
     echo "CRL Distribution tag/ offset not found"
-    return $FALSE
+    return 1
   fi
-  child_crl=$(openssl asn1parse -in $1 -inform DER -strparse $OFFSET -out /dev/stdout -noout | grep -o 'http.*')
+
+  child_crl=$(openssl asn1parse -in $1 -inform DER -strparse $OFFSET \
+  -out /dev/stdout -noout | grep -o 'http.*')
   wget -N $child_crl -q
-  local crl_name=$(echo $child_crl| grep -o [a-zA-Z_0-9]*.crl$)
+  local crl_name=$(echo $child_crl| grep -o "[a-zA-Z_0-9]*.crl$")
 
   grep BEGIN $crl_name -q
   if [ $? == 0 ];then
-    cp $crl_name $global_EK_certificate_CRL
+    cp $crl_name $2
   else
-    openssl crl -in $crl_name -inform DER -out $global_EK_certificate_CRL -outform PEM
+    openssl crl -in $crl_name -inform DER -out $2 \
+    -outform PEM
   fi
 
-  cat EK_certificate_chain.pem $global_EK_certificate_CRL > crl_EK_certificate_chain.pem
-  return $TRUE
+  cat $3 $2 > $4
+
+  return 0
+}
+
+retrieve_ek_certificates_from_NV() {
+  get_EK_Certificate_from_NV $1 $2
+  if [ $? != 0 ];then
+    echo "ERROR: EK Certificate could not be read from NV Index"
+    cleanup_and_exit_in_error
+  fi
+  openssl x509 -in $2 -inform DER -out $3 -outform PEM > /dev/null
+}
+
+retrieve_ek_certificates_from_iKGF() {
+  get_EK_certificate_based_on_manufacturer_generated_EPS $1 $2 $3 $4
+  if [ $? != 0 ];then
+    echo "ERROR: EK Certificate could not be retrieved from manufacturer hosting"
+    cleanup_and_exit_in_error
+  fi
 }
 
 #
 # MAIN
 #
 : <<'PROTOCOL'
- SCENARIOS: (A) Platform powered first time with no EK certificate or recert need
-            (B) Platform powered with EK certificate revoked and no FW update
-            (C) Platform powered with EK certificate revoked and FW update
+ SCENARIOS: (A) Platform with no EK certificate in FS/ NV/ Manufacturer-Backends
+            (B) Platform with EK certificate revoked and tpmGeneratedEPS = 0
+            (C) Platform with EK certificate revoked and tpmGeneratedEPS = 1
 
  # Evaluate Pre-Conditions
  # GET CERT: NV/ iKGF/ TSI
  # EK CERTIFICATE PKI VALIDATION
 PROTOCOL
 
-#===================================== 
+#=====================================
 # Evaluate Pre-Conditions
-#===================================== 
+#=====================================
+while getopts ':E' 'enableecc'; do
+    case ${enableecc} in
+        'E')
+            # Update the value of the option x flag we defined above
+            flag_is_ecc_cert_required=1
+            ;;
+        '?')
+            echo "INVALID OPTION -- ${OPTARG}" >&2
+            exit 1
+            ;;
+        *)
+            echo "UNIMPLEMENTED OPTION -- ${OPTKEY}" >&2
+            exit 1
+            ;;
+    esac
+done
+shift $(( OPTIND - 1 ))
+[[ "${1}" == "--" ]] && shift
+
 is_ptt
-if [ $? != $TRUE ];then
-  echo "ERROR: Active TPM manufacturer is not INTC. Exiting Intel EK Certification App."
-  cleanup_and_exit $FALSE
+if [ $? != 0 ];then
+  echo "ERROR: Active TPM manufacturer is not INTC. Exiting Intel\
+  EK Certification App."
+  cleanup_and_exit_in_error
 fi
 
 is_EPS_TPM_generated
-global_flag_TPM_EPS=$?
 
-is_nv_index_defined_and_written $global_NV_index
-global_flag_NV=$?
+is_nv_index_defined_and_written $rsa_ekcertificate_NV_index
+if [ $? == 0 ];then
+  flag_rsa_NV=1
+fi
 
-is_EK_certificate_present_on_filesystem $cfg_EK_DER_certificate
-global_flag_EK_certificate_on_filesystem=$?
+if [ -f $cfg_rsa_EK_DER_certificate ]; then
+  flag_rsa_EK_certificate_on_filesystem=1
+  echo "Proceeding checks with RSA EK Certificate present on filesystem"
+fi
 
-get_current_EK $global_EK_current
+get_current_rsa_EK $rsa_EK_current
 if [ $? != 0 ];then
-  echo "ERROR: EKpublic could not be read"
-  cleanup_and_exit $FALSE
+  echo "ERROR: EKpublic of type RSA could not be read"
+  cleanup_and_exit_in_error
+fi
+
+if [ $flag_is_ecc_cert_required == 1 ];then
+  is_nv_index_defined_and_written $ecc_ekcertificate_NV_index
+  if [ $? == 0 ];then
+    flag_ecc_NV=1
+  fi
+
+  if [ -f $cfg_ecc_EK_DER_certificate ];then
+    flag_ecc_EK_certificate_on_filesystem=1
+    echo "Proceeding checks with ECC EK Certificate present on filesystem"
+  fi
+
+  get_current_ecc_EK $ecc_EK_current
+  if [ $? != 0 ];then
+    echo "ERROR: EKpublic of type ECC could not be read"
+    cleanup_and_exit_in_error
+  fi
 fi
 
 #=====================================
 # GET CERT: NV/ iKGF/ TSI
 #=====================================
 #NV
-if [[ $global_flag_EK_certificate_on_filesystem == 0 && $global_flag_NV == 1 ]];then
-  get_EK_Certificate_from_NV $global_NV_index $cfg_EK_DER_certificate
-  if [ $? != $TRUE ];then
-    echo "ERROR: EK Certificate could not be read from NV Index"
-    cleanup_and_exit $FALSE
-  fi
-  openssl x509 -in $cfg_EK_DER_certificate -inform DER -out $cfg_EK_PEM_certificate -outform PEM > /dev/null
-fi
 
+  if [[ $flag_rsa_EK_certificate_on_filesystem == 0 &&
+        $flag_rsa_NV == 1 ]];then
+    echo "Reading RSA EK Certificate from NV Index"
+    retrieve_ek_certificates_from_NV \
+    $rsa_ekcertificate_NV_index \
+    $cfg_rsa_EK_DER_certificate \
+    $cfg_rsa_EK_PEM_certificate
+  fi
+  if [[ $flag_ecc_EK_certificate_on_filesystem == 0 &&
+        $flag_is_ecc_cert_required == 1 &&
+        $flag_ecc_NV == 1 ]];then
+    echo "Reading ECC EK Certificate from NV Index"
+    retrieve_ek_certificates_from_NV \
+    $ecc_ekcertificate_NV_index \
+    $cfg_ecc_EK_DER_certificate \
+    $cfg_ecc_EK_PEM_certificate
+  fi
+
+# Test connectivity for iKGF/ TSI and certificate-validation
 is_connectivity_ok
 
 #iKGF
-if [[ $global_flag_EK_certificate_on_filesystem == 0 && $global_flag_TPM_EPS == 0 ]];then
-  get_EK_certificate_based_on_manufacturer_generated_EPS \
-  $global_raw_EK_certificate $global_EK_current $cfg_EK_DER_certificate $cfg_EK_PEM_certificate
-  if [ $? != $TRUE ];then
-    echo "ERROR: EK Certificate could not be retrieved from manufacturer hosting"
-    cleanup_and_exit_with_no_messages
+  if [[ $flag_rsa_EK_certificate_on_filesystem == 0 &&
+        $flag_TPM_EPS == 0 ]];then
+    echo "Retrieving RSA EK Certificate from iKGF backend"
+    retrieve_ek_certificates_from_iKGF \
+    $raw_rsa_EK_certificate \
+    $rsa_EK_current \
+    $cfg_rsa_EK_DER_certificate \
+    $cfg_rsa_EK_PEM_certificate
   fi
+  if [[ $flag_ecc_EK_certificate_on_filesystem == 0 &&
+        $flag_is_ecc_cert_required == 1 &&
+        $flag_TPM_EPS == 0 ]];then
+    echo "Retrieving ECC EK Certificate from iKGF backend"
+    retrieve_ek_certificates_from_iKGF \
+    $raw_ecc_EK_certificate \
+    $ecc_EK_current \
+    $cfg_ecc_EK_DER_certificate \
+    $cfg_ecc_EK_PEM_certificate
+  fi
+
+
+#iCLS
+if [[ $flag_rsa_EK_certificate_on_filesystem == 0 ||
+     $flag_ecc_EK_certificate_on_filesystem == 0 ]];then
+
+  if [[ $flag_rsa_NV == 0 && $flag_TPM_EPS == 1 ]];then
+    if [ "$EUID" -ne 0 ];then
+      echo "ERROR: Root permissions missing to run the recertification operation"
+      cleanup_and_exit_in_error
+    fi
+
+    echo "Retrieving RSA/ ECC EK Certificate from iCLS backend"
+    $cfg_PTT_RECOVERY_APP
+    if [ $? != 0 ];then
+      echo "ERROR: Recovery process failed. Check logs for details OR contact OEM"
+      cleanup_and_exit_in_error
+    fi
+    echo "Recovery successful. Attempting to read new EK certificate from NV"
+
+    if [ $flag_rsa_NV == 1 ];then
+      echo "Reading RSA EK Certificate from NV Index"
+      retrieve_ek_certificates_from_NV \
+      $rsa_ekcertificate_NV_index \
+      $cfg_rsa_EK_DER_certificate \
+      $cfg_rsa_EK_PEM_certificate
+    fi
+    if [[ $flag_is_ecc_cert_required == 1 && $flag_ecc_NV == 1 ]];then
+      echo "Reading ECC EK Certificate from NV Index"
+      retrieve_ek_certificates_from_NV \
+      $ecc_ekcertificate_NV_index \
+      $cfg_ecc_EK_DER_certificate \
+      $cfg_ecc_EK_PEM_certificate
+    fi
+  fi
+
 fi
 
-#TSI
-if [[ $global_flag_EK_certificate_on_filesystem == 0 && $global_flag_NV == 0 && $global_flag_TPM_EPS == 1 ]];then
-  make_current_ek_persistent $global_EK_current 
-  if [ $? != $TRUE ];then
-    echo "ERROR: EKpublic could not be made persistent"
-    #Check PH or OH Password
-    cleanup_and_exit $FALSE
-  fi
-  
-  if [ "$EUID" -ne 0 ];then
-    echo "ERROR: Root permissions missing to run the recertification operation"
-    cleanup_and_exit_with_no_messages
-  fi
-  
-  $cfg_PTT_RECOVERY_APPLICATION
-  if [ $? != 0 ];then
-    echo "ERROR: Recovery process failed. Check logs for details OR contact OEM"
-    cleanup_and_exit $FALSE
-  fi
-
-  echo "Recovery successful. Attempting to read new EK certificate from NV"
-  get_EK_Certificate_from_NV $global_NV_index $cfg_EK_DER_certificate
-  if [ $? != $TRUE ];then
-    echo "ERROR: EK Certificate could not be read from NV Index"
-    cleanup_and_exit $FALSE
-  fi
-  openssl x509 -in $cfg_EK_DER_certificate -inform DER -out $cfg_EK_PEM_certificate -outform PEM > /dev/null
-
-fi
-
-
-#===================================== 
+#=====================================
 # EK CERTIFICATE PKI VALIDATION
-#===================================== 
+#=====================================
+
 #check EK public in certificate
-is_EK_from_cert_same_as_current_EK
-if [ $? != $TRUE ];then
-  echo "ERROR: EKpublic from the EK certificate does not match the one from PTT"
-  cleanup_and_exit $FALSE
+is_EK_from_cert_same_as_current_EK \
+$cfg_rsa_EK_DER_certificate \
+$rsa_EK_in_certificate \
+$rsa_ek_offset_in_pub \
+$rsa_ek_offset_in_cert \
+$rsa_ek_pub_length \
+$rsa_EK_current
+if [ $? != 0 ];then
+  echo "ERROR: RSA EKpublic from the EK certificate does not match the one from PTT"
+  cleanup_and_exit_in_error
+fi
+if [ $flag_is_ecc_cert_required == 1 ];then
+  is_EK_from_cert_same_as_current_EK \
+  $cfg_ecc_EK_DER_certificate \
+  $ecc_EK_in_certificate \
+  $ecc_ek_offset_in_pub \
+  $ecc_ek_offset_in_cert \
+  $ecc_ek_pub_length \
+  $ecc_EK_current
+  if [ $? != 0 ];then
+    echo "ERROR: ECC EKpublic from the EK certificate does not match the one from PTT"
+    cleanup_and_exit_in_error
+  fi
 fi
 
 #build certificate chain and download platform CRL
-build_EK_certificate_chain $cfg_EK_DER_certificate
-if [ $? != $TRUE ];then
+echo "Downloading intermediate and root CA certificates"
+build_EK_certificate_chain \
+$cfg_rsa_EK_DER_certificate \
+$rsa_EK_certificate_chain \
+$reordered_rsa_EK_certificate_chain
+if [ $? != 0 ];then
   echo "ERROR: PKI validation cannot continue, error building certificate chain"
-  cleanup_and_exit $FALSE
+  cleanup_and_exit_in_error
+fi
+if [ $flag_is_ecc_cert_required == 1 ];then
+  build_EK_certificate_chain \
+  $cfg_ecc_EK_DER_certificate \
+  $ecc_EK_certificate_chain \
+  $reordered_ecc_EK_certificate_chain
+  if [ $? != 0 ];then
+    echo "ERROR: PKI validation cannot continue, error building certificate chain"
+    cleanup_and_exit_in_error
+  fi
 fi
 
 #check if platform certificate chain is valid
-openssl verify -CAfile $global_root_PEM EK_certificate_chain.pem > /dev/null
+echo "Validating EK certificate chain"
+openssl verify -CAfile $root_PEM \
+$reordered_rsa_EK_certificate_chain > /dev/null
 if [ $? != 0 ];then
-  echo "ERROR: Failed PKI validation"
-  cleanup_and_exit $FALSE
+  echo "ERROR: Failed PKI validation for RSA EK certificate"
+  cleanup_and_exit_in_error
+fi
+if [ $flag_is_ecc_cert_required == 1 ];then
+  openssl verify -CAfile $root_PEM \
+  $reordered_ecc_EK_certificate_chain > /dev/null
+  if [ $? != 0 ];then
+    echo "ERROR: Failed PKI validation for ECC EK certificate"
+    cleanup_and_exit_in_error
+  fi
 fi
 
 #check if platform certificate is revoked in CRL
-update_platform_CRL_data_to_EK_certificate_chain $cfg_EK_DER_certificate
-if [ $? != $TRUE ];then
-  echo "CAUTION: CRL for the EK certificate not found"
-  cleanup_and_exit $TRUE
-fi
-openssl verify -crl_check -CAfile crl_EK_certificate_chain.pem $cfg_EK_PEM_certificate > /dev/null
+echo "Downloading certificate revocation list information"
+update_platform_CRL_data_to_EK_certificate_chain \
+$cfg_rsa_EK_DER_certificate \
+$rsa_EK_certificate_CRL \
+$reordered_rsa_EK_certificate_chain \
+$crl_reordered_rsa_EK_certificate_chain
 if [ $? != 0 ];then
-  echo "CAUTION: Failed CRL checks for the EK certificate"
-  echo "         Please update system time/ date to current and try again"
-  echo "         Contact OEM if problem persists"
-  cleanup_and_exit $TRUE
+  echo "CAUTION: CRL for the RSA EK certificate not found"
+  cleanup
+  exit 0
+fi
+if [ $flag_is_ecc_cert_required == 1 ];then
+  update_platform_CRL_data_to_EK_certificate_chain \
+  $cfg_ecc_EK_DER_certificate \
+  $ecc_EK_certificate_CRL \
+  $reordered_ecc_EK_certificate_chain \
+  $crl_reordered_ecc_EK_certificate_chain
+  if [ $? != 0 ];then
+    echo "CAUTION: CRL for the ECC EK certificate not found"
+    cleanup
+    exit 0
+  fi
 fi
 
-cleanup_and_exit $TRUE
+echo "Checking certificate revocation list"
+openssl verify -crl_check -CAfile $crl_reordered_rsa_EK_certificate_chain \
+$cfg_rsa_EK_PEM_certificate > /dev/null
+if [ $? != 0 ];then
+  echo "CAUTION: Failed CRL checks for the RSA EK certificate"
+  echo "         Please update system time/ date to current and try again"
+  echo "         Contact OEM if problem persists"
+  cleanup
+  exit 0
+fi
+if [ $flag_is_ecc_cert_required == 1 ];then
+  openssl verify -crl_check -CAfile $crl_reordered_ecc_EK_certificate_chain \
+  $cfg_ecc_EK_PEM_certificate > /dev/null
+  if [ $? != 0 ];then
+    echo "CAUTION: Failed CRL checks for the ECC EK certificate"
+    echo "         Please update system time/ date to current and try again"
+    echo "         Contact OEM if problem persists"
+    cleanup
+    exit 0
+  fi
+fi
+
+echo "Endorsement key certificate download/ validation complete"
+
+cleanup
+exit 0
