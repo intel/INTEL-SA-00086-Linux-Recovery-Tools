@@ -578,6 +578,36 @@ if [[ $flag_rsa_EK_certificate_on_filesystem == 0 ||
     fi
     echo "Recovery successful. Attempting to read new EK certificate from NV"
 
+    is_nv_index_defined_and_written $rsa_ekcertificate_NV_index
+    if [ $? == 0 ];then
+      flag_rsa_NV=1
+    else
+      echo "ERROR: RSA EK NV index definition failure post recovery"
+      cleanup_and_exit_in_error
+    fi
+
+    get_current_rsa_EK $rsa_EK_current
+    if [ $? != 0 ];then
+      echo "ERROR: EKpublic of type RSA could not be read"
+      cleanup_and_exit_in_error
+    fi
+
+    if [ $flag_is_ecc_cert_required == 1 ];then
+      is_nv_index_defined_and_written $ecc_ekcertificate_NV_index
+      if [ $? == 0 ];then
+        flag_ecc_NV=1
+      else
+        echo "ERROR: ECC EK NV index definition failure post recovery"
+        cleanup_and_exit_in_error
+      fi
+
+      get_current_ecc_EK $ecc_EK_current
+      if [ $? != 0 ];then
+        echo "ERROR: EKpublic of type ECC could not be read"
+        cleanup_and_exit_in_error
+      fi
+    fi
+
     if [ $flag_rsa_NV == 1 ];then
       echo "Reading RSA EK Certificate from NV Index"
       retrieve_ek_certificates_from_NV \
