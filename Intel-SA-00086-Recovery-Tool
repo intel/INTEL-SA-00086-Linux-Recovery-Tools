@@ -222,13 +222,13 @@ get_EK_certificate_based_on_manufacturer_generated_EPS() {
 }
 
 get_offset_from_asn1_tag() {
-  openssl asn1parse -in $1 -inform DER | grep "$2" -q
+  openssl asn1parse -in $1 -inform DER 2>/dev/null | grep "$2" -q
   if [ $? != 0 ];then
     return 1
   fi
 
   local __offset=$3
-  local offset=$(openssl asn1parse -in $1  -inform DER | grep "$2" -A2 |
+  local offset=$(openssl asn1parse -in $1  -inform DER 2>/dev/null| grep "$2" -A2 |
     grep STRING | grep -o '^[ ]\{1,\}[0-9]\{1,\}')
   if [ $? != 0 ];then
     echo "ERROR: Failed to retrieve offset for tag"
@@ -242,9 +242,16 @@ get_offset_from_asn1_tag() {
 
 #RSA/ ECC
 is_EK_from_cert_same_as_current_EK() {
-  openssl x509 -pubkey -inform DER -in $1 -out /tmp/pub.pem
-  openssl asn1parse -in /tmp/pub.pem -inform PEM -out $2 -noout
- 
+  openssl x509 -pubkey -inform DER -in $1 -out /tmp/pub.pem 2>/dev/null
+  if [ $? != 0 ];then
+    echo "ERROR: Failed to read EK public"
+    return 1
+  fi
+  openssl asn1parse -in /tmp/pub.pem -inform PEM -out $2 -noout 2>/dev/null
+  if [ $? != 0 ];then
+    echo "ERROR: Failed to read EK public"
+    return 1
+  fi
   #Check if EK from cert is same as current EK
   $(cmp -i $3:$4 -n $5 $6 $2 -s)
   if [ $? != 0 ];then
@@ -262,14 +269,24 @@ is_cert_root_certificate() {
     echo "ERROR: Authority Key Identifier tag/ offset not found"
     return 1
   fi
-  openssl asn1parse -in $1 -inform DER -out authority -noout -strparse $OFFSET
+  openssl asn1parse -in $1 -inform DER -out authority -noout \
+  -strparse $OFFSET 2> /dev/null
+  if [ $? != 0 ];then
+    echo "ERROR: Failed asn parsing"
+    return 1
+  fi
   
   get_offset_from_asn1_tag $1 "Subject Key Identifier" OFFSET
   if [ $? != 0 ];then
     echo "ERROR: Subject Key Identifier tag/ offset not found"
     return 1
   fi
-  openssl asn1parse -in $1 -inform DER -strparse $OFFSET -out subject -noout
+  openssl asn1parse -in $1 -inform DER -strparse $OFFSET -out subject \
+  -noout 2>/dev/null
+  if [ $? != 0 ];then
+    echo "ERROR: Failed asn parsing"
+    return 1
+  fi
 
   cmp -i 4:2 authority subject -s
   rval=$?
@@ -291,7 +308,11 @@ is_certificate_parent_downloaded() {
 
   local parent_cert
   parent_cert=$(openssl asn1parse -in $1 -inform DER -strparse $OFFSET \
-  -out /dev/stdout -noout | grep -o 'http.*')
+  -out /dev/stdout -noout 2>/dev/null | grep -o 'http.*')
+  if [ $? != 0 ];then
+    echo "ERROR: Failed asn parsing"
+    return 1
+  fi
   wget -N  $parent_cert -q
   if [ $? != 0 ];then
     echo "Failed to download $parent_cert"
@@ -316,7 +337,11 @@ is_certificate_parent_exist() {
       #No parent certificate found
       return 1
     else
-      openssl x509 -in $1 -inform PEM -out $1.cert -outform DER
+      openssl x509 -in $1 -inform PEM -out $1.cert -outform DER 2>/dev/null
+      if [ $? != 0 ];then
+        echo "ERROR: Failed PEM to DER conversion"
+        return 1
+      fi
     fi
   else
     cp $1 $1.cert
@@ -346,7 +371,7 @@ is_connectivity_ok() {
 }
 
 convert_to_pem_and_add_to_chain() {
-  openssl x509 -in $1 -inform DER -out $1.pem -outform PEM
+  openssl x509 -in $1 -inform DER -out $1.pem -outform PEM 2> /dev/null
   if [ $? != 0 ];then
     cp $1 $1.pem
   fi
@@ -367,7 +392,6 @@ build_EK_certificate_chain() {
   while [[ $is_root == 0 ]];do
     is_certificate_parent_exist $Child
     if [ $? == 0 ];then
-      #echo $temp_parent_name
       convert_to_pem_and_add_to_chain $temp_parent_name
       Child=$temp_parent_name
     else
@@ -381,7 +405,10 @@ build_EK_certificate_chain() {
     fi
   done
   #Root Certificate
-  openssl x509 -in $Child -inform DER -out $root_PEM -outform PEM
+  openssl x509 -in $Child -inform DER -out $root_PEM -outform PEM 2>/dev/null
+  if [ $? != 0 ];then
+    cp $Child $root_PEM
+  fi
   #Reorder non-root certificates
   sed '/./{H;d;};x;s/\n/={NL}=/g' $2 | 
   sed -e 's/^={NL}=//' -e '1!G;h;$!d' | 
@@ -400,7 +427,11 @@ update_platform_CRL_data_to_EK_certificate_chain () {
   fi
 
   child_crl=$(openssl asn1parse -in $1 -inform DER -strparse $OFFSET \
-  -out /dev/stdout -noout | grep -o 'http.*')
+  -out /dev/stdout -noout 2>/dev/null| grep -o 'http.*')
+  if [ $? != 0 ];then
+    echo "ERROR: Fail asn parse"
+    return 1
+  fi
   wget -N $child_crl -q
   local crl_name=$(echo $child_crl| grep -o "[a-zA-Z_0-9]*.crl$")
 
@@ -409,7 +440,11 @@ update_platform_CRL_data_to_EK_certificate_chain () {
     cp $crl_name $2
   else
     openssl crl -in $crl_name -inform DER -out $2 \
-    -outform PEM
+    -outform PEM 2>/dev/null
+    if [ $? != 0 ];then
+      echo "ERROR: Failed DER to PEM conversion"
+      return 1
+    fi
   fi
 
   cat $3 $2 > $4
@@ -424,6 +459,10 @@ retrieve_ek_certificates_from_NV() {
     cleanup_and_exit_in_error
   fi
   openssl x509 -in $2 -inform DER -out $3 -outform PEM > /dev/null
+  if [ $? != 0 ];then
+    echo "ERROR: EK certificate in NV not in DER format"
+    cleanup_and_exit_in_error
+  fi
 }
 
 retrieve_ek_certificates_from_iKGF() {
