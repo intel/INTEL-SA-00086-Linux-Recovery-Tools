@@ -313,7 +313,7 @@ is_certificate_parent_downloaded() {
     echo "ERROR: Failed asn parsing"
     return 1
   fi
-  wget -N  $parent_cert -q
+  wget -N  $parent_cert -q --no-cache
   if [ $? != 0 ];then
     echo "Failed to download $parent_cert"
     return 1
@@ -359,7 +359,7 @@ is_certificate_parent_exist() {
 
 is_connectivity_ok() {
   wget http://upgrades.intel.com/content/CRL/ekcert/EKRootPublicKey.cer \
-  -q --timeout=5 --tries=3 --no-check-certificate
+  -q --timeout=5 --tries=3 --no-check-certificate --no-cache
   if [ $? != 0 ];then
     echo "ERROR: Cannot reach the hosting."
     echo \
@@ -432,7 +432,7 @@ update_platform_CRL_data_to_EK_certificate_chain () {
     echo "ERROR: Fail asn parse"
     return 1
   fi
-  wget -N $child_crl -q
+  wget -N $child_crl -q --no-cache
   local crl_name=$(echo $child_crl| grep -o "[a-zA-Z_0-9]*.crl$")
 
   grep BEGIN $crl_name -q
