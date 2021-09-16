@@ -22,7 +22,7 @@ Please refer the link for a full list of affected platforms.
    g++, m4, libtool, automake, libgcrypt20-dev, libssl-dev, autoconf, gnulib,
    wget, libdbus-1-dev, libglib2.0-dev, libcurl4-openssl-dev, dbus-x11,
    iproute2, libtasn1-6-dev, socat, libseccomp-dev, gawk, libyaml-dev, uuid-dev
-5. Install tpm2-software: tpm2-tss v2.3.2, tpm2-abrmd v2.3.1 and tpm2-tools v4.1.1
+5. Install tpm2-software: tpm2-tss v3.1.0, tpm2-abrmd v2.4.0 and tpm2-tools v4.1.1
    by executing the "build.sh" script as "sudo".
 6. If the dependency packages were installed appropriately, the build.sh should
    proceed to indicate the appropriate icls package versions ( i386/ x86_64 )

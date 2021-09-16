@@ -38,9 +38,9 @@
 pushd Packages
 
 #TSS
-wget https://github.com/tpm2-software/tpm2-tss/releases/download/2.3.2/tpm2-tss-2.3.2.tar.gz
-tar -xvzf tpm2-tss-2.3.2.tar.gz
-pushd tpm2-tss-2.3.2
+wget https://github.com/tpm2-software/tpm2-tss/releases/download/3.1.0/tpm2-tss-3.1.0.tar.gz
+tar -xvzf tpm2-tss-3.1.0.tar.gz
+pushd tpm2-tss-3.1.0
 ./configure  --with-udevrulesdir=/etc/udev/rules.d/
 if [ $? != 0 ];then
  echo "ERROR: Missing package dependencies for tss installation."
@@ -61,9 +61,9 @@ sudo pkill -HUP dbus-daemon
 popd
 
 #ABRMD
-wget https://github.com/tpm2-software/tpm2-abrmd/releases/download/2.3.1/tpm2-abrmd-2.3.1.tar.gz
-tar -xvzf tpm2-abrmd-2.3.1.tar.gz
-pushd tpm2-abrmd-2.3.1
+wget https://github.com/tpm2-software/tpm2-abrmd/releases/download/2.4.0/tpm2-abrmd-2.4.0.tar.gz
+tar -xvzf tpm2-abrmd-2.4.0.tar.gz
+pushd tpm2-abrmd-2.4.0
 ./configure --with-dbuspolicydir=/etc/dbus-1/system.d
 if [ $? != 0 ];then
  echo "ERROR: Missing package dependencies for tpm2-abrmd installation."
