@@ -35,6 +35,7 @@ Please refer the link for a full list of affected platforms.
    * rpm   --> "rpm -i -nodeps iclsClient<version>.<arch>.rpm"
    * alien --> "alien -i -nodeps –-script iclsClient<version>.<arch>.rpm"
    * yum   --> "yum install iclsClient<version>.<arch>.rpm"
+   * apt   --> "alien --to-deb iclsClient<version>.<arch>.rpm && dpkg -i iclsClient<version>.<arch>.deb"
 9. Please make sure system wide proxy has been setup and the platform is connected.
 9. After installing above dependencies a reboot is required. 
 
